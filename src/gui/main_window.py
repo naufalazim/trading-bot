@@ -13,7 +13,7 @@ from src.data.analysis import calculate_rsi, predict_price, predict_price_range
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("AI-Powered Stock Trading Bot")
+        self.setWindowTitle("NopalGPT Stock Analysis")
         self.setGeometry(100, 100, 1000, 800)
         
         # Main layout
@@ -158,7 +158,7 @@ class MainWindow(QMainWindow):
         row = 4
         for date, price in predictions.items():
             if date != today:  # Skip today as we already displayed it
-                self.data_grid.addWidget(QLabel(f"Prediction ({date}):"), row, 0)
+                self.data_grid.addWidget(QLabel(f"Prediction:"), row, 0)
                 pred_label = QLabel(f"${price:.2f}")
                 # Color based on comparison to current price
                 if price > current_price:

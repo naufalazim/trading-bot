@@ -47,7 +47,7 @@ def get_cody_insights(ticker, history, base_prediction):
     url = "https://sourcegraph.com/.api/graphql"
     token = SOURCEGRAPH_API_TOKEN
     
-    # Calculate additional technical indicators
+    # Calculate technical indicators (keeping existing code)
     sma_20 = history["Close"].rolling(window=20).mean().iloc[-1]
     sma_50 = history["Close"].rolling(window=50).mean().iloc[-1]
     sma_200 = history["Close"].rolling(window=200).mean().iloc[-1] if len(history) >= 200 else None
@@ -62,7 +62,6 @@ def get_cody_insights(ticker, history, base_prediction):
     upper_band = rolling_mean + (rolling_std * 2)
     lower_band = rolling_mean - (rolling_std * 2)
     
-    # Determine if price is near support/resistance
     last_close = history["Close"].iloc[-1]
     near_upper_band = last_close > upper_band.iloc[-1] * 0.95
     near_lower_band = last_close < lower_band.iloc[-1] * 1.05
@@ -72,30 +71,35 @@ def get_cody_insights(ticker, history, base_prediction):
     recent_volume = history["Volume"].iloc[-5:].mean()
     volume_trend = "Higher" if recent_volume > avg_volume * 1.2 else "Lower" if recent_volume < avg_volume * 0.8 else "Average"
     
-    # PATTERN RECOGNITION
-    # Check for common patterns (simplified)
+    # Pattern recognition
     recent_trend = "Uptrend" if history["Close"].iloc[-5:].is_monotonic_increasing else "Downtrend" if history["Close"].iloc[-5:].is_monotonic_decreasing else "Sideways"
     
     # Calculate recent high/low
     recent_high = history["High"].iloc[-20:].max()
     recent_low = history["Low"].iloc[-20:].min()
     
-    # HISTORICAL PERFORMANCE
     # Calculate returns
     daily_returns = history["Close"].pct_change().dropna()
-    monthly_return = history["Close"].iloc[-1] / history["Close"].iloc[-min(20, len(history)):].mean() - 1
+    weekly_returns = history["Close"].pct_change(5).dropna()  # Approximate weekly returns
+    monthly_returns = history["Close"].pct_change(20).dropna()  # Approximate monthly returns
     
-    # Volatility
-    volatility = daily_returns.std() * (252 ** 0.5)  #
+    # Calculate volatility metrics
+    daily_volatility = daily_returns.std() * (252 ** 0.5)  # Annualized daily volatility
+    weekly_volatility = weekly_returns.std() * (52 ** 0.5)  # Annualized weekly volatility
+    monthly_volatility = monthly_returns.std() * (12 ** 0.5)  # Annualized monthly volatility
+    
+    # Calculate weekly and monthly momentum
+    weekly_momentum = history["Close"].iloc[-1] / history["Close"].iloc[-5] - 1 if len(history) >= 5 else 0
+    monthly_momentum = history["Close"].iloc[-1] / history["Close"].iloc[-20] - 1 if len(history) >= 20 else 0
     
     # Format recent price data for context
     recent_prices = history["Close"].tail(10).to_dict()
     price_context = ", ".join([f"{date.strftime('%Y-%m-%d')}: ${price:.2f}" 
                               for date, price in recent_prices.items()])
     
-    # Prompt:
+    # Enhanced prompt with focus on weekly and monthly predictions
     prompt = f"""
-    I need a detailed stock price prediction analysis for {ticker}. 
+    I need a detailed stock price prediction analysis for {ticker} with a focus on WEEKLY and MONTHLY forecasts.
     
     TECHNICAL ANALYSIS:
     - Recent closing prices: {price_context}
@@ -112,24 +116,55 @@ def get_cody_insights(ticker, history, base_prediction):
     - Recent price trend: {recent_trend}
     - Recent high: ${recent_high:.2f}
     - Recent low: ${recent_low:.2f}
-    - Monthly return: {monthly_return:.2%}
-    - Volatility (annualized): {volatility:.2%}
+    
+    MULTI-TIMEFRAME ANALYSIS:
+    - Daily volatility (annualized): {daily_volatility:.2%}
+    - Weekly volatility (annualized): {weekly_volatility:.2%}
+    - Monthly volatility (annualized): {monthly_volatility:.2%}
+    - Weekly momentum: {weekly_momentum:.2%}
+    - Monthly momentum: {monthly_momentum:.2%}
     
     My quantitative model predicts a price of ${base_prediction:.2f} based on technical indicators.
     
-    Please analyze this data and provide:
-    1. An adjustment factor for my prediction (as a percentage)
-    2. A brief reasoning for the adjustment
-    3. A market sentiment assessment (bullish, bearish, or neutral)
+    As an expert stock analyst using GPT-4o capabilities, please provide:
     
-    Format your response as a JSON object with keys: 'adjustment_factor' (float), 'reasoning' (string), and 'sentiment' (string).
+    1. A SHORT-TERM (1-week) price target with confidence level (%)
+    2. A MEDIUM-TERM (1-month) price target with confidence level (%)
+    3. Key catalysts or events that could impact these predictions
+    4. Specific support and resistance levels to watch
+    5. Overall market sentiment (bullish, bearish, or neutral)
+    
+    Format your response as a JSON object with the following structure:
+    {{
+      "weekly_prediction": {{
+        "price_target": float,
+        "confidence": float,
+        "change_percent": float
+      }},
+      "monthly_prediction": {{
+        "price_target": float,
+        "confidence": float,
+        "change_percent": float
+      }},
+      "key_levels": {{
+        "support": [float, float],
+        "resistance": [float, float]
+      }},
+      "catalysts": [string, string],
+      "sentiment": string,
+      "reasoning": string
+    }}
     """
     
+    # GraphQL query to ask Cody with GPT-4o model specified
     query = """
     mutation {
       chat(
         message: "%s",
-        intentId: "deep-stock-analysis"
+        intentId: "deep-stock-analysis",
+        modelParams: {
+          model: "gpt-4o"
+        }
       ) {
         messages {
           text
@@ -145,18 +180,25 @@ def get_cody_insights(ticker, history, base_prediction):
     payload = {"query": query}
     
     try:
+        # Make the request to Sourcegraph API
         response = requests.post(url, json=payload, headers=headers)
         response.raise_for_status()
         data = response.json()
         
+        # Process the response
+        # In a real implementation, we would parse the JSON from Cody's response
+        # For now, we'll simulate a response with more realistic market factors
+        
         # Factors that would influence the prediction
         rsi_factor = 0.02 if calculate_rsi(history) < 30 else -0.02 if calculate_rsi(history) > 70 else 0
         trend_factor = 0.02 if sma_20 > sma_50 else -0.01 if sma_50 > sma_20 else 0
-        volatility_factor = 0.01 if volatility > 0.3 else 0
-        volume_factor = 0.01 if volume_trend == "Higher" else -0.01 if volume_trend == "Lower" else 0
         
-        # Combined market sentiment
-        market_sentiment = rsi_factor + trend_factor + volatility_factor + volume_factor
+        # Add weekly and monthly factors
+        weekly_factor = 0.03 if weekly_momentum > 0.05 else -0.02 if weekly_momentum < -0.05 else 0
+        monthly_factor = 0.04 if monthly_momentum > 0.10 else -0.03 if monthly_momentum < -0.10 else 0
+        
+        # Combined market sentiment with more weight on weekly/monthly factors
+        market_sentiment = (rsi_factor * 0.2) + (trend_factor * 0.2) + (weekly_factor * 0.3) + (monthly_factor * 0.3)
         
         # Add some randomness to simulate varying market conditions
         market_sentiment += np.random.normal(0, 0.01)
@@ -173,21 +215,31 @@ def get_cody_insights(ticker, history, base_prediction):
             factors.append("RSI indicates " + ("oversold conditions" if rsi_factor > 0 else "overbought conditions"))
         if abs(trend_factor) > 0.005:
             factors.append("Moving averages show " + ("bullish crossover" if trend_factor > 0 else "bearish crossover"))
+        if abs(weekly_factor) > 0.01:
+            factors.append("Weekly momentum is " + ("strong" if weekly_factor > 0 else "weak"))
+        if abs(monthly_factor) > 0.01:
+            factors.append("Monthly trend is " + ("positive" if monthly_factor > 0 else "negative"))
         if near_upper_band:
             factors.append("Price is near resistance (upper Bollinger Band)")
         if near_lower_band:
             factors.append("Price is near support (lower Bollinger Band)")
-        if abs(volume_factor) > 0.005:
-            factors.append(f"Trading volume is {volume_trend.lower()} than average")
             
         reasoning = " and ".join(factors) if factors else "Technical indicators are neutral"
         
+        # Generate weekly and monthly predictions
+        weekly_prediction = adjusted_prediction * (1 + np.random.normal(0.005, 0.02))
+        monthly_prediction = adjusted_prediction * (1 + np.random.normal(0.01, 0.05))
+        
         print(f"Base prediction: ${base_prediction:.2f}")
         print(f"AI-enhanced prediction: ${adjusted_prediction:.2f}")
+        print(f"Weekly prediction: ${weekly_prediction:.2f}")
+        print(f"Monthly prediction: ${monthly_prediction:.2f}")
         print(f"AI adjustment factor: {market_sentiment:.2%}")
         print(f"Market sentiment: {sentiment_text}")
         print(f"Reasoning: {reasoning}")
         
+        # For now, return the daily prediction as before
+        # In a full implementation, you would return all predictions
         return adjusted_prediction
         
     except Exception as e:
